@@ -2,7 +2,7 @@
 
 This repository contains the full pipeline for training, evaluating, and analyzing scaling laws in autoregressive SVG generation models. The project is built around a GPT-style transformer architecture adapted from **nanoGPT (Karpathy)**, with extensions for structured SVG modeling and Maximal Update Parameterization (**μP**, Yang et al.).
 
-The codebase is organized so that **all experiments are reproducible from notebooks**, while core logic is implemented in modular Python files.
+The codebase is organized so that all experiments are reproducible from notebooks, while core logic is implemented in modular Python files.
 
 ---
 
@@ -15,18 +15,8 @@ The system supports:
 - Scaling law fitting (deterministic + Bayesian MCMC via PyMC)
 - Unconditional and conditional SVG generation
 - Full evaluation pipeline (loss, perplexity, render validity)
-- Automated logging, checkpointing, and visualization
+- Logging, checkpointing, and visualization
 
----
-
-## Design Notes
-
-- Model architecture is heavily based on **nanoGPT**
-- μP is used for width-invariant training dynamics and scaling analysis
-- Context length is fixed at **512 tokens**
-- Vocabulary size is fixed at **8000 tokens**
-- Training runs are optimized for GPU execution (CUDA recommended, not required)
-- Most experimentation is designed around comparing **standard vs μP scaling behavior**
 
 ---
 
@@ -41,28 +31,27 @@ graph TD
     classDef data fill:#e8f0fe,stroke:#0550ae,stroke-width:2px,color:#0550ae;
     classDef output fill:#dafbe1,stroke:#1a7f37,stroke-width:2px,color:#1a7f37;
 
-    A[SVG Datasets <br> Raw Data]:::data --> B[data_to_token.ipynb <br> - cleaning <br> - canonicalization <br> - byte-level BPE tokenization <br> - filtering / validation]:::process
+    A[SVG Datasets <br> Raw Data]:::data --> B[data_to_token.ipynb <br> - cleaning <br> - canonicalization <br> - BPE tokenization <br> - filtering / validation]:::process
     B --> C[Binary Memmap Dataset <br> /data/*.bin]:::data
     C --> D[train_pipeline.ipynb <br> - GPT training loop <br> - standard / μP models <br> - checkpointing <br> - logging via GPTLibrary]:::process
     D --> E[GPTLibrary Object <br> - metrics storage <br> - loss tracking <br> - experiment registry]:::data
     E --> F[eval.ipynb <br> - generation <br> - perplexity <br> - postprocess <br> - render tests]:::process
     E --> G[plot_models.ipynb <br> - scaling laws <br> - μP vs standard <br> - MCMC PyMC <br> - loss curves]:::process
-    F --> H[Results / Outputs <br> - visualizations <br> - checkpoints <br> - SVG samples]:::output
+    F --> H[Results / Outputs <br> - visualizations <br> - - SVG samples]:::output
     G --> H
 ```
 
----
+
 
 ## Repository Structure
 
 ### Notebooks (Experiment Pipelines)
 
 All `.ipynb` files are **end-to-end experiment pipelines**:
-
+- `data_to_token.ipynb` → full dataset cleaning + tokenization pipeline
 - `train_pipeline.ipynb` → main training entry point
 - `eval.ipynb` → generation + test evaluation (loss, perplexity, rendering, post-processing)
 - `plot_models.ipynb` → scaling law fitting + visualization (standard vs μP)
-- `data_to_token.ipynb` → full dataset cleaning + tokenization pipeline
 
 ---
 
@@ -84,7 +73,7 @@ Defines the full GPT architecture:
 - generation function (top-k sampling, temperature scaling)
 
 #### `gpt_library.py`
-A high-level experiment manager that:
+A high-level experiment logger that:
 - Stores multiple trained models
 - Logs training metrics (loss, perplexity, etc.)
 - Provides dataframe access to results
@@ -119,7 +108,7 @@ library = GPTLibrary(STANDARD_CONFIG)
 
 ### Configuration Setup
 
-A config is a dictionary of `GPTConfig` objects:
+Models are configured using a dictionary of `GPTConfig` objects:
 
 ```python
 STANDARD_CONFIG = {
@@ -137,7 +126,7 @@ run_train_pipeline(library, file_prefix, mup_bool, train_best_bool)
 **Behavior:**
 - **Default:** Trains 1 epoch per model in the library.
 - **If `train_best = True`:**
-  - Runs full training schedule (from config epochs).
+  - Runs full training schedule (from 'global_config.py' epochs).
   - Disables LR sweep.
   - Uses fixed learning rate from config.
 
@@ -146,10 +135,10 @@ run_train_pipeline(library, file_prefix, mup_bool, train_best_bool)
 Run via: `eval.ipynb`
 
 **Includes:**
+- Post-processing (XML repair, truncation fixes)
 - Unconditional generation
 - Conditional generation
 - Test set perplexity
-- Post-processing (XML repair, truncation fixes)
 - Render validation
 
 ### 4. Plot Scaling Laws
@@ -157,23 +146,11 @@ Run via: `eval.ipynb`
 Run via: `plot_models.ipynb`
 
 **Supports:**
-- Standard vs μP comparison
+- Fit scaling laws to model family
 - Loss curves
-- Log-log scaling fits
+- np.polyfit calculation
 - Bayesian MCMC scaling law estimation (PyMC)
 
-> **Note:** All functions support a `mup=True/False` flag to automatically switch datasets.
-
----
-
-## GPTLibrary Usage
-
-```python
-df = library.get_df()
-```
-
-- **Default** → Summary metrics
-- `full=True` → Full loss curves (time series dataframe)
 
 ---
 
@@ -186,23 +163,30 @@ If using μP:
 - Model uses:
   - MuReadout head
   - μP initialization rules
-  - Width-stable optimization scaling
+  - MuAdamW optimizater
 
-### Data Pipeline
 
-**Tokenization:**
-- Byte-level BPE tokenizer
-- Strict canonicalization of SVG
-- Outputs stored as `.bin` memmap files
-- Saved automatically to: `/data`
 
 ### Training Outputs
 
 Automatically saved:
 - **Checkpoints** → `/training_checkpoints`
-- **GPTLibrary objects** → Saved per epoch
+- **GPTLibrary objects** → Saved per full training run across all models in the run
 - **Visualizations** → `/visualizations`
 - **Tokenized datasets** → `/data`
+
+
+
+
+## Raw Training Metric Retrieval
+
+Load 'GPTLibrary' object from the pkl file generated during training.
+```python
+df = library.get_df()
+```
+
+- **Default** → Summary metrics
+- `full=True` → Full loss curves 
 
 ---
 
@@ -221,31 +205,9 @@ Automatically saved:
 ## System Notes
 
 - CUDA is recommended but not required.
-- CPU training is supported (slower).
-- Main bottlenecks: Memory + sequence length, not compute.
-- Designed for reproducible scaling law analysis.
+- CPU/MPS training is supported (slower).
 
----
 
-## Model Architecture Summary
 
-Based on nanoGPT, the model includes:
-- Causal self-attention
-- Learned positional embeddings
-- GELU MLP blocks
-- Optional μP scaling support
-- Untied embeddings in this setup
 
-**μP Behavior:**
-- Stabilizes training across widths.
-- Improves scaling law comparability.
-- Reduces sensitivity to hyperparameter tuning.
 
----
-
-## Workflow
-
-1. **Preprocess** → `data_to_token.ipynb`
-2. **Train** → `train_pipeline.ipynb`
-3. **Evaluate** → `eval.ipynb`
-4. **Analyze** → `plot_models.ipynb`
